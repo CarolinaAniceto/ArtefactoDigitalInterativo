@@ -1,47 +1,47 @@
-const FUNDO = [235, 45, 7];
-const PUNHO = 0.25;
-const dist2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const numBracos = (c) => round(map(c.aberta, PUNHO, 1, 3, 12, true));
-const BASE = 52;
+const FUNDO = [235, 45, 7]; // cor de funo em HSB (azul muito escuro)
+const PUNHO = 0.25; // abaixo desta abertura a mão conta como punho fechado
+const dist2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y); // distância entre dois pontos da mão
+const numBracos = (c) => round(map(c.aberta, PUNHO, 1, 3, 12, true)); // número de braços da simetria, 3 = mão a abrir, 12 = mão completamente aberta. O map converte a abertura, o round arredonda e o true impede que saia do intervalo
+const BASE = 52; // nota mais grave
 const TIMBRES = [
   { nome: 'sino', onda: 'sine', ratio: 3.01, mix: 0.45, dur: 1.8 },
   { nome: 'harpa', onda: 'triangle', ratio: 2, mix: 0.30, dur: 1.0 },
   { nome: 'vidro', onda: 'sine', ratio: 4.2, mix: 0.25, dur: 2.4 },
   { nome: 'marimba', onda: 'sine', ratio: 4, mix: 0.60, dur: 0.5 },
-];
+]; // o timbre é o carácter do som, a onda forma a onda do oscilador principal, o ratio define quantas vezes o harmónico é mais agudo que a nota principal, o mix é a mistura da onda com o ratio, e a dur é a duração em segundos até a nota desaparecer
 const ESCALAS = [
   { nome: 'pentatónica maior', notas: [0, 2, 4, 7, 9] },
   { nome: 'pentatónica menor', notas: [0, 3, 5, 7, 10] },
   { nome: 'hirajoshi', notas: [0, 2, 3, 7, 8] },
-];
+]; // conjuntos de 5 notas em meios-tons acima da nota base
 
-let pg;
-let raio;
-let permanente = false;
-let cam, landmarker, ultimoT = -1, maos = [];
+let pg; 
+let raio; 
+let permanente = false; // faz com que o desenho desvaneça
+let cam, landmarker, ultimoT = -1, maos = []; // câmara, detetor de mãos, último frama analisado e mão detetadas
 let estado = 'a iniciar a câmara...';
-let mostrarCam = true;
-let canetas = [];
-let luz = new Array(15).fill(0);
-let timbre = 0, esc = 0, mudo = false;
-let ac, saida, eco, feedback;
+let mostrarCam = true; // mostra a câmara no canto da tela
+let canetas = []; // define uma caneta para cada mão
+let luz = new Array(15).fill(0); // brilho de cada marca
+let timbre = 0, esc = 0, mudo = false; // valores do timbre e escala no modo mudo
+let ac, saida, eco, feedback; 
 
 function setup() {
   createCanvas (windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 1);
   textFont('Georgia');
   criarCamada();
-  iniciarMaos();
+  iniciarMaos(); // liga a câmara e carrega o modelo das mãos
 }
 
 function criarCamada() {
   pg = createGraphics(width, height);
   pg.colorMode(HSB, 360, 100, 100, 1);
-  pg.background(...FUNDO);
+  pg.background(...FUNDO); // os 3 pontos antes de FUNDO desdobram o array em 3 valores
 }
 
 function draw() {
-  raio = min(width, height) * 0.45;
+  raio = min(width, height) * 0.45; // recalculado a cada frame, para se poder adaptar ao tamanho da janela
   lerMaos();
   atualizarCanetas();
   if (!permanente) {
@@ -50,7 +50,7 @@ function draw() {
     pg.fill(...FUNDO, 0.035);
     pg.rect(0, 0, width, height);
   }
-  canetas.forEach((c, i) => { tocarNota(c, i); desenhar(c); });
+  canetas.forEach((c, i) => { tocarNota(c, i); desenhar(c); }); // faz com que cada mão toque notas diferentes
   atualizarSom();
   image(pg, 0, 0);
   moldura();
@@ -59,7 +59,7 @@ function draw() {
   mensagens();
 }
 
-function simetria(n, fn) {
+function simetria(n, fn) { // repete o desenho feito pelas mão em n vezes (dependendo da abertura da mão) à volta do centro da moldura
   for (let k = 0; k < n; k++) {
     pg.push();
     pg.rotate((k / n) * TWO_PI);
@@ -75,7 +75,7 @@ function windowResized() {
   criarCamada();
 }
 
-async function iniciarMaos() {
+async function iniciarMaos() { // usa-se o async para carregar antes e não bloquear o resto do código
   try {
     cam = createCapture(VIDEO);
     cam.size(640, 480);
@@ -92,8 +92,8 @@ async function iniciarMaos() {
       runningMode: 'VIDEO',
       numHands: 2,
     });
-    try { landmarker = await HandLandmarker.createFromOptions(fileset, opcoes('GPU')); }
-    catch (e) { landmarker = await HandLandmarker.createFromOptions(fileset, opcoes('CPU')); }
+    try { landmarker = await  HandLandmarker.createFromOptions(fileset, opcoes('GPU')); }
+    catch (e) { landmarker = await HandLandmarker.createFromOptions(fileset, opcoes('CPU')); } // tenta usar primeiro a placa gráfica, se falhar, usa o processador
     estado= '';
   } catch (e) {
     estado = 'não foi possível iniciar as mãos (' + (e.name || e.message) + '). Recarrega a página.';
@@ -108,13 +108,13 @@ try { maos = landmarker.detectForVideo(v, performance.now()).landmarks; }
 catch (e) { maos = []; }
 }
 
-function previsao() {
+function previsao() { // desenha uma miniatura da câmara no canto do ecrã, espelhada para fazer os mesmos movimentos que os desenhos, e com 21 pontos de tracking em cada mão
   if (!mostrarCam || !cam) return;
   const w = 180, h = 135, x = width - w - 12, y = height - h - 12;
   push();
   translate(x + w, y);
-  scale(-1, 1);
-  tint(0, 0, 100, 0.45);
+  scale(-1, 1); // espelha a imagem
+  tint(0, 0, 100, 0.45); // deixa a câmara semi-transparente
   image(cam, 0, 0, w, h);
   pop();
   noTint();
@@ -123,17 +123,17 @@ function previsao() {
   for (const lm of maos) for (const p of lm) circle(x + (1 - p.x) * w, y + p.y * h, 3);
 }
 
-function abertura(lm) {
+function abertura(lm) { // mede a abertura da mão dependendo de quantos dos 21 pontos estão vísiveis
   let r = 0;
   for (const f of [8, 12, 16, 20]) r += dist2(lm[f], lm[0]) / dist2(lm[9], lm[0]);
   return constrain(map(r / 4, 1.1, 1.9, 0, 1), 0, 1);
 }
 
-function atualizarCanetas() {
+function atualizarCanetas() { // transforma cada mão numa caneta
   canetas.length = maos.length;
   maos.forEach((lm, i) => {
     const px = (lm[0].x + lm[5].x + lm[9].x + lm[17].x) / 4;
-    const py = (lm[0].y + lm[5].y + lm[9].y + lm[17].y) / 4;
+    const py = (lm[0].y + lm[5].y + lm[9].y + lm[17].y) / 4; // faz com que os movimentos estejam espelhado para se alinharem com a câmara
     const alvoX = constrain(map(px, 0.85, 0.15, -1, 1), -1, 1) * raio;
     const alvoY = constrain(map(py, 0.15, 0.85, -1, 1), -1, 1) * raio;
 
@@ -148,13 +148,13 @@ function atualizarCanetas() {
 }
 
 function desenhar(c) {
-  if (!c.ativa || c.vel < 0.5) return;
+  if (!c.ativa || c.vel < 0.5) return; // define que, quando a mão está fechada num punho, não desenha
   const n = numBracos(c);
   const matiz = map(dist(0, 0, c.x, c.y), 0, raio, 175, 330, true);
   pg.push();
-  pg.translate(width / 2, height / 2);
+  pg.translate(width / 2, height / 2); // define a origem da simetria no centro
   pg.blendMode(ADD);
-  pg.strokeWeight(constrain(1 + c.vel * 0.04, 1, 3.5));
+  pg.strokeWeight(constrain(1 + c.vel * 0.04, 1, 3.5)); // define que a velocidade a que se mexe a mão está relacionada à stroke weight
   pg.stroke(matiz, 60, 100, 0.5);
   simetria(n, () => pg.line(c.ax, c.ay, c.x, c.y));
   if (c.nota) {
@@ -167,7 +167,7 @@ function desenhar(c) {
   pg.pop();
 }
 
-function cursores () {
+function cursores () { // serve para mostrar onde a caneta ligada às mãos está
   push();
   translate(width / 2, height / 2);
   noFill();
@@ -185,7 +185,7 @@ function cursores () {
   pop();
 }
 
-function moldura() {
+function moldura() { // 4 círculos estáticos e 1 cruz que ficam no centro do ecrã, e servem como área que pode ser afetada pelas canetas
   push();
   translate(width / 2, height / 2);
   noFill();
@@ -197,25 +197,25 @@ function moldura() {
 
   strokeWeight(2);
   for (let i = 0; i < 15; i++) {
-    stroke(45, 25, 100, 0.2 + luz[i] * 0.8);
+    stroke(45, 25, 100, 0.2 + luz[i] * 0.8); // mais vísivel quando a nota toca
     const y = map(i, 0, 14, raio, -raio);
     const x = -width / 2 + 24;
-    line(x, y, x + (i % 5 === 0 ? 16 : 8), y);
-    luz[i] *= 0.92;
+    line(x, y, x + (i % 5 === 0 ? 16 : 8), y); 
+    luz[i] *= 0.92; // apaga aos poucos
   }
   pop();
 }
 
-function iniciarSom() {
+function iniciarSom() { // cria o aúdio depois de um clique
   if (ac) { ac.resume(); return; }
   ac = new (window.AudioContext || window.webkitAudioContext)();
   saida = ac.createGain();
   saida.gain.value = 0;
-  const comp = ac.createDynamicsCompressor();
+  const comp = ac.createDynamicsCompressor(); // evita que o som sature
   saida.connect(comp);
   comp.connect(ac.destination);
-  eco = ac.createDelay(1);
-  eco.delayTime.value = 0.32;
+  eco = ac.createDelay(1); 
+  eco.delayTime.value = 0.32; // cria um eco suave de 0,32 segundos
   feedback = ac.createGain();
   feedback.gain.value = 0.35;
   const filtro = ac.createBiquadFilter();
@@ -227,20 +227,20 @@ function iniciarSom() {
   filtro.connect(saida);
 }
 
-function atualizarSom() {
+function atualizarSom() { // o volume e o eco ficam a zeros de forma suave
   if (!ac) return;
   const ligado = !mudo && canetas.some((c) => c.ativa);
   saida.gain.setTargetAtTime(ligado ? 0.9 : 0, ac.currentTime, 0.04);
   feedback.gain.setTargetAtTime(ligado ? 0.35 : 0, ac.currentTime, 0.04);
 }
 
-function tocarNota(c, i) {
+function tocarNota(c, i) { // decide que nota tocar e quando
   if (!c.ativa) { c.acc = 0; return; }
-  c.acc += c.vel;
-  if (c.acc < raio * 0.14 || millis() - c.ultima < 70) return;
+  c.acc += c.vel; // distância percorrida pela caneta e só toca quando a distância chega a um valor; mexer mais depressa = mais notas
+  if (c.acc < raio * 0.14 || millis() - c.ultima < 70) return; 
   c.acc = 0;
   c.ultima = millis();
-  const notas = ESCALAS[esc].notas;
+  const notas = ESCALAS[esc].notas; 
   const idx = constrain(floor(map(c.y, -raio, raio, 15, 0)), 0, 14);
   const oitava = random() < 0.08 ? 12 : 0;
   const midi = BASE + notas[idx % 5] + 12 * floor(idx / 5) + oitava;
@@ -250,16 +250,16 @@ function tocarNota(c, i) {
   if (ac) tocar(midi, forca, constrain(c.x / raio, -1, 1), c.aberta, (timbre + i) % TIMBRES.length);
 }
 
-function tocar(midi, forca, pan, brilho, qual) {
+function tocar(midi, forca, pan, brilho, qual) { 
   const T = TIMBRES[qual];
   const t = ac.currentTime;
   const f = 440 * Math.pow(2, (midi - 69) / 12);
-  const o1 = ac.createOscillator();
+  const o1 = ac.createOscillator(); // nota principal 
   o1.type = T.onda;
   o1.frequency.value = f;
-  const o2 = ac.createOscillator();
+  const o2 = ac.createOscillator(); // harmónico
   o2.frequency.value = f * T.ratio;
-  const g2 = ac.createGain();
+  const g2 = ac.createGain(); // volume do harmónico
   g2.gain.value = T.mix * brilho;
   const env = ac.createGain();
   env.gain.setValueAtTime(0.0001, t);
@@ -267,30 +267,30 @@ function tocar(midi, forca, pan, brilho, qual) {
   env.gain.exponentialRampToValueAtTime(0.0001, t + T.dur);
   const p = ac.createStereoPanner();
   p.pan.value = pan;
-  const envio = ac.createGain();
+  const envio = ac.createGain(); // quanto da nota vai para o eco
   envio.gain.value = 0.4;
   o1.connect(env); o2.connect(g2); g2.connect(env);
   env.connect(p);
   p.connect(saida);
   p.connect(envio); envio.connect(eco);
   o1.start(t); o2.start(t);
-  o1.stop(t + T.dur + 0.1); o2.stop(t + T.dur + 0.1);
+  o1.stop(t + T.dur + 0.1); o2.stop(t + T.dur + 0.1); // desliga os osciladores no fim
 }
-
-function mousePressed() { iniciarSom(); }
+ 
+function mousePressed() { iniciarSom(); } // o primeiro clique liga o som
 
 function keyPressed() {
   iniciarSom();
   if (key >= '1' && key <= '4') timbre = int(key) - 1;
-  else if (key === 'e') esc = (esc + 1) % ESCALAS.length;
-  else if (key === 'f') permanente = !permanente;
-  else if (key === 'x') pg.background(...FUNDO);
-  else if (key === 'c') mostrarCam = !mostrarCam;
-  else if (key === 'm') mudo = !mudo;
-  else if (key === 's') save(pg, 'maestro-de-luz.png');
+  else if (key === 'e') esc = (esc + 1) % ESCALAS.length; // muda a escala
+  else if (key === 'f') permanente = !permanente; // torna o desenho permanente
+  else if (key === 'x') pg.background(...FUNDO); // limpa o fundo
+  else if (key === 'c') mostrarCam = !mostrarCam; // mostra/esconde a cama
+  else if (key === 'm') mudo = !mudo; // mudo
+  else if (key === 's') save(pg, 'maestro-de-luz.png'); // guarda o desenho
 }
 
-function mensagens() {
+function mensagens() { // define o texto fixo que fica no canto superior esquerdo
   noStroke();
   fill(0, 0, 100, 0.65);
   textSize(13);
